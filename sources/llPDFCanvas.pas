@@ -21,7 +21,7 @@ uses
 {$else}
   WinAPI.Windows, System.SysUtils, System.Classes, Vcl.Graphics, System.Math,
 {$endif}
-{$ifdef WIN64}
+{$ifdef W3264}
   System.ZLib, System.ZLibConst,
 {$else}
   llPDFFlate,        
@@ -115,17 +115,78 @@ type
     FCAN:Boolean;
     FName: AnsiString;
     FVisible: Boolean;
+
+    FNestedContent: TAnsiStringList;
+    FReflectActualNesting: Boolean;
+    function GetNestedCount: Integer;
+    function GetRawString(): AnsiString;
   protected
     procedure Save;override;
+
+    property RawString: AnsiString read GetRawString;
   public
+   {$ifndef UNICODE}
+    Charset : TFontCharset;
+   {$endif}
+    /// <summary>
+    /// Parent element of of this element
+    /// </summary
+    Parent: TOptionalContent;
     constructor Create( PDFEngine: TPDFEngine;Name:AnsiString;Visible,CanExchange:Boolean);
+    destructor Destroy();override;
+    /// <summary>
+    /// Append nested element to this element
+    /// </summary
+    procedure AppendNested(Content: TOptionalContent);
+    /// <summary>
+    /// Find nested element of this element
+    /// </summary
+    function FindNested(NestedName: AnsiString): TOptionalContent;
+    /// <summary>
+    /// Get list of nested elements for this element
+    /// </summary
+    function GetNested(List: TAnsiStringList; OnlySibling: Boolean = True;
+      Append: Boolean = False): Integer;overload;
+    /// <summary>
+    /// Get list of nested elements for this element
+    /// </summary
+    function GetNested(List: TList; OnlySibling: Boolean = True;
+      Append: Boolean = False): Integer;overload;
+    /// <summary>
+    /// Remove nested element
+    /// </summary
+    procedure RemoveNested(Content: TOptionalContent);overload;
+    /// <summary>
+    /// Remove nested element by its name
+    /// </summary
+    procedure RemoveNested(Name: AnsiString);overload;
+    /// <summary>
+    /// Remove all nested elements of this element
+    /// </summary
+    procedure RemoveAllNested();
+    /// <summary>
+    /// Count all sibling nested elements of this element
+    /// </summary
+    property NestedCount: Integer read GetNestedCount;
+    /// <summary>
+    ///  present collections of related optional content groups (layers),
+    //    as actual nesting of groups and layers
+    /// </summary
+    property ReflectActualNesting: Boolean read FReflectActualNesting write FReflectActualNesting;
   end;
 
-
   TOptionalContents = class(TPDFListManager)
+  private
+    function IsExitst( const AName: AnsiString ): Boolean;virtual;
   protected
     procedure Save;override;
+    function GetByName( const AName: AnsiString ): TOptionalContent;virtual;
   public
+   {$ifndef UNICODE}
+    Charset : TFontCharset;
+   {$endif}
+    property Exists[const AName: AnsiString]: Boolean read IsExitst;
+    property Item[const AName: AnsiString]: TOptionalContent read GetByName;
   end;
 
   /// <summary>
@@ -2313,6 +2374,7 @@ procedure TPDFCanvas.GStateRestore;
 begin
   if FBCDStart then
     raise EPDFException.Create(SBCDSaveRestoreStateError);
+    
   if FSaveCount <> 1 then
   begin
     EndText;
@@ -2327,6 +2389,7 @@ procedure TPDFCanvas.GStateSave;
 begin
   if FBCDStart then
     raise EPDFException.Create(SBCDSaveRestoreStateError);
+
   EndText;
   Inc ( FSaveCount );
   AppendAction ( 'q' );
@@ -4820,29 +4883,212 @@ end;
 
 { TOptionalConent }
 
+procedure TOptionalContent.AppendNested(Content: TOptionalContent);
+begin
+  if Content = nil then
+    Exit;
+
+  if not Assigned(FNestedContent) then
+    FNestedContent := TAnsiStringList.Create;
+
+  if FNestedContent.IndexOf(Content.FName) <> -1 then
+    Exit;
+
+  Content.Parent := Self;
+  FNestedContent.AddObject(Content.FName,Content);
+end;
+
 constructor TOptionalContent.Create(PDFEngine: TPDFEngine; Name: AnsiString;
   Visible, CanExchange: Boolean);
 begin
   inherited Create(PDFEngine);
+
   FName := Name;
   FVisible := Visible;
   FCAN := CanExchange;
+  FReflectActualNesting:= True;
 end;
+
+procedure TOptionalContent.RemoveAllNested();
+var
+  i : Integer;
+begin
+  if Assigned( FNestedContent ) then
+  begin
+    for i := 0 to FNestedContent.Count -1 do
+      TOptionalContent(FNestedContent.Objects[i]).Parent := nil;
+
+    FNestedContent.Clear;
+  end;
+end;
+
+procedure TOptionalContent.RemoveNested(Name: AnsiString);
+var
+  Index: Integer;
+begin
+  if not Assigned(FNestedContent) then
+    Exit;
+
+  Index := FNestedContent.IndexOf(Name);
+
+  if Index > -1 then
+  begin
+    TOptionalContent(FNestedContent.Objects[Index]).Parent := nil;
+    FNestedContent.Delete(Index);
+  end;
+
+end;
+
+procedure TOptionalContent.RemoveNested(Content: TOptionalContent);
+var
+  Index: Integer;
+begin
+  if not Assigned(FNestedContent) then
+    Exit;
+
+  Index := FNestedContent.IndexOfObject(Content);
+  if Index > -1 then
+  begin
+    TOptionalContent(FNestedContent.Objects[Index]).Parent := nil;
+    FNestedContent.Delete(Index);
+  end;
+end;
+
+function TOptionalContent.GetRawString(): AnsiString;
+var
+  i: Integer;
+begin
+  if NestedCount = 0 then
+    Result := ' '+ Self.RefID
+  else
+  begin
+  {$ifndef UNICODE}
+    if FReflectActualNesting then
+      Result := Self.RefID + '['
+    else
+      Result := ' [('+UnicodeChar(FName,Charset)+') ';
+  {$else}
+    if FReflectActualNesting then
+      Result := ' '+Self.RefID + '['
+    else
+      Result := ' [('+UnicodeChar(String(FName))+') ';
+  {$endif}
+    for i := 0 to NestedCount -1 do
+      Result := Result + TOptionalContent(FNestedContent.Objects[i]).RawString;
+      
+    Result :=   Result + '] ';
+  end;
+end;
+
+function TOptionalContent.GetNestedCount: Integer;
+begin
+  Result := 0;
+
+  if Assigned(FNestedContent) then
+    Result := FNestedContent.Count;
+end;
+
+destructor TOptionalContent.Destroy;
+begin
+  if Assigned( FNestedContent ) then
+    FreeAndNil( FNestedContent );
+
+  inherited;
+end;
+
+function TOptionalContent.FindNested(NestedName: AnsiString): TOptionalContent;
+var
+  i : Integer;
+  n : TOptionalContent;
+begin
+
+  Result := nil;
+  for i := 0 to NestedCount -1 do
+  begin
+    n := TOptionalContent(FNestedContent.Objects[i]);
+
+    if AnsiSameText(String(NestedName),String(n.FName)) then
+      Result := n
+    else
+      Result := n.FindNested(NestedName);
+
+    if Assigned(Result) then
+      Break;
+  end;
+end;
+
+function TOptionalContent.GetNested(List: TAnsiStringList;
+  OnlySibling: Boolean; Append: Boolean): Integer;
+var
+  i : Integer;
+  n : TOptionalContent;
+begin
+  Result := 0;
+
+  if not Append then
+    List.Clear;
+
+  for i := 0 to NestedCount -1 do
+  begin
+    n := TOptionalContent(FNestedContent.Objects[i]);
+
+    // to avoid duplicates
+    if List.IndexOf(n.FName) < 0 then
+    begin
+      Inc(Result);
+      List.AddObject(n.FName,n);
+    end;
+
+    if not OnlySibling then
+      Result := Result + n.GetNested(List,OnlySibling,True);
+  end;
+end;
+
+function TOptionalContent.GetNested(List: TList;
+  OnlySibling: Boolean; Append: Boolean): Integer;
+var
+  i : Integer;
+  n : TOptionalContent;
+begin
+  Result := 0;
+  if not Append then
+    List.Clear;
+
+  // to avoid duplicates
+  for i := 0 to NestedCount -1 do
+  begin
+    n := TOptionalContent(FNestedContent.Objects[i]);
+    if List.IndexOf(n) < 0 then
+    begin
+      List.Add(n);
+
+      Inc(Result);
+    end;
+
+    if not OnlySibling then
+      Result := Result + n.GetNested(List,OnlySibling,True);
+  end;
+end;
+
 
 procedure TOptionalContent.Save;
 begin
   Eng.StartObj ( ID );
-  Eng.SaveToStream ( '/Name ' + CryptString( FName ) );
-  Eng.SaveToStream ( '/Type/OCG');
+  Eng.SaveToStream ( '/Type/OCG');  
+{$ifndef UNICODE}
+  Eng.SaveToStream ( '/Name ' + CryptString( UnicodeChar(FName, Charset) ) );
+{$else}
+  Eng.SaveToStream ( '/Name ' + CryptString( UnicodeChar(string(FName)) ) );
+{$endif}
   Eng.CloseObj;
 end;
-
 
 { TOptionalContents }
 
 procedure TOptionalContents.Save;
 var
   i: Integer;
+  processed: TList;
 begin
   inherited;
   if FList.Count = 0 then Exit;
@@ -4865,15 +5111,49 @@ begin
   FEngine.SaveToStream ( '/Locked [', false );
   for i := 0 to FList.Count - 1 do
     if not TOptionalContent(FList[i]).FCAN then
-    FEngine.SaveToStream ( ' '+ TPDFObject(FList[i]).RefID, False);
-  FEngine.SaveToStream ( ' ]');
-    FEngine.SaveToStream ( '/Order [', false );
-  for i := 0 to FList.Count - 1 do
-    FEngine.SaveToStream ( ' '+ TPDFObject(FList[i]).RefID, False);
+      FEngine.SaveToStream ( ' '+ TPDFObject(FList[i]).RefID, False);
   FEngine.SaveToStream ( ' ]');
 
+  processed := TList.Create;
+  try
+    FEngine.SaveToStream ( '/Order [', false );
+
+    for i := 0 to FList.Count - 1 do
+    begin
+      // to avoid duplicates
+      if Processed.IndexOf(FList[i]) <> -1 then
+        Continue;
+
+      FEngine.SaveToStream ( TOptionalContent(FList[i]).RawString, False );
+
+      TOptionalContent(FList[i]).GetNested(processed,False,True);
+    end;
+
+    FEngine.SaveToStream ( ' ]');
+  finally
+    processed.Free;
+  end;
+  
   FEngine.SaveToStream ( ' >>');
   FEngine.CloseObj;
+end;
+
+function TOptionalContents.GetByName( const AName: AnsiString ): TOptionalContent;
+var
+  i : integer;
+begin
+  for i := 0 to FList.Count -1 do
+  begin
+    Result := TOptionalContent(FList.Items[i]);
+    if AnsiSameText( String(Result.FName), String(AName) ) then
+      Exit;
+  end;
+  Result := nil;
+end;
+
+function TOptionalContents.IsExitst( const AName: AnsiString ): Boolean;
+begin
+  Result := Assigned( Self.Item[AName] );
 end;
 
 function TPDFCanvas.GetStringType(CheckStr:AnsiString): TStringType;
@@ -4896,8 +5176,6 @@ begin
     else
       result := stNeedUnicode;
 end;
-
-
 
 end.
 

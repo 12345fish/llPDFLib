@@ -14,11 +14,12 @@ unit llPDFDocument;
 interface
 uses
 {$ifndef USENAMESPACE}
-  Windows, SysUtils, Classes, Graphics, ShellAPI,
+  Windows, SysUtils, Classes, Graphics, ShellAPI, Printers,
 {$else}
-  WinAPI.Windows, System.SysUtils, System.Classes, Vcl.Graphics, WinAPI.ShellAPI,
+  WinAPI.Windows, System.SysUtils, System.Classes, Vcl.Graphics,
+  WinAPI.ShellAPI, Vcl.Printers,
 {$endif}
-{$ifdef WIN64}
+{$ifdef W3264}
   System.ZLib, System.ZLibConst,
 {$else}
   llPDFFlate,
@@ -90,6 +91,7 @@ type
   /// </summary>
   TPDFDocument = class(TComponent)
   private
+    FAsPrinter: Boolean;
     FAborted: Boolean;
     FAcroForms: TPDFAcroForms;
     FActions: TPDFActions;
@@ -134,6 +136,7 @@ type
     function GetNonEmbeddedFonts: TStringList;
     function GetPage(Index: Integer): TPDFPage;
     function GetPageNumber: Integer;
+    function GetUsedDC(): HDC;
     procedure SaveCryptDictionary(ID: Integer);
     procedure SetAutoCreateURL(const Value: Boolean);
     procedure SetCurrentPageIndex(Index: Integer);
@@ -159,6 +162,18 @@ type
     ///   Establishes the relationship of a component and its Owner
     /// </param>
     constructor Create(AOwner: TComponent); override;
+    /// <summary>
+    ///   Creates and initializes an instance of TPDFDocument with parameters
+    ///  like specified Printer, if the specified printer not found,
+    ///  it will use the default printer
+    /// </summary>
+    /// <param name="AOwner">
+    ///   Establishes the relationship of a component and its Owner
+    /// </param>
+    /// <param name="PrinterName">
+    ///   Establishes printer name 
+    /// </param>
+    constructor CreateLikeAPrinter(AOwner: TComponent; const APrinterName: string);
     destructor Destroy; override;
     /// <summary>
     ///   It stops the creation of PDF document. All data that are sent to a file will be lost
@@ -175,7 +190,7 @@ type
     ///   Procedure adds a new form in the document
     /// </summary>
     /// <param name="OptionalContent">
-    ///   Optional content, at start of which this form will be seen. If the value 
+    ///   Optional content, at start of which this form will be seen. If the value
     ///    is nil, the form will be seen everywhere, where it will be depicted.
     /// </param>
     /// <returns>
@@ -390,6 +405,15 @@ type
     ///   Specifies whether to create a document that is compatible with PDF / A standard.
     /// </summary>
     property PDFACompatible: Boolean read FPDFACompatible write SetPDFACompatible;
+    /// <summary>
+    ///   Specifies whether list of sub-clauses of content in a PDF document
+    //  that can be selectively viewed or hidden by document authors or consumers
+    /// </summary>
+    property OptionalContents: TOptionalContents read FOptionalContents;
+    /// <summary>
+    ///   Specifies referrence decive context used for GDI drawing
+    /// </summary>
+    property UsedDC: HDC read GetUsedDC;
   end;
 
 
@@ -431,6 +455,9 @@ begin
   FGStates := TPDFListManager.Create( FEngine);
   FNames := TPDFNames.Create(FEngine, FPages);
   FOptionalContents := TOptionalContents.Create( FEngine);
+{$ifndef UNICODE}
+  FOptionalContents.Charset := GetDefFontCharSet;
+{$endif}
 
   FPages.Patterns := FPatterns;
   FPages.Images := FImages;
@@ -440,6 +467,7 @@ begin
   FDocumentInfo.Creator := 'llPDFLib Application';
   FDocumentInfo.Keywords := 'llPDFLib';
   FDocumentInfo.FProducer := 'llPDFLib 6.x (http://www.sybrex.com)';
+
   FDocumentInfo.Author := 'Windows User';
   FDocumentInfo.Title := 'No Title';
   FDocumentInfo.Subject := 'None';
@@ -447,6 +475,30 @@ begin
   FSecurity.CryptMetadata := True;
   FDocumentInfo.CreationDate := Now;
   FSecurity.State := ssNone;
+end;
+
+constructor TPDFDocument.CreateLikeAPrinter(AOwner: TComponent; const APrinterName: string);
+var
+  ReferrenceDC: HDC;
+  SavedPrinterIndex: Integer;
+begin
+  Create( AOwner );
+
+  FAutoLaunch := False;
+  FAsPrinter:= True;
+
+  SavedPrinterIndex := Printer.PrinterIndex;
+
+  Printer.PrinterIndex := Printer.Printers.IndexOf(APrinterName);
+
+  ReferrenceDC := CreateDC(
+   'WINSPOOL',PChar(Printer.Printers[Printer.PrinterIndex]),nil,nil);
+
+  EMFOptions.UsedDC := ReferrenceDC;
+
+  DeleteDC(ReferrenceDC);
+
+  Printer.PrinterIndex := SavedPrinterIndex;
 end;
 
 destructor TPDFDocument.Destroy;
@@ -635,6 +687,11 @@ begin
   Result := FPages.CurrentPageIndex + 1;
 end;
 
+function TPDFDocument.GetUsedDC: HDC;
+begin
+  Result := EMFOptions.UsedDC; 
+end;
+
 procedure TPDFDocument.NewPage;
 var
   I:Integer;
@@ -765,6 +822,9 @@ procedure TPDFDocument.StoreDocument;
 var
   i: Integer;
   CatalogID, InfoID, EncryptID, MetaID: Integer;
+{$IFDEF PDF_CANVAS_DEBUG}
+  Dbg: TMemoryStream;
+{$ENDIF}  
 begin
   InfoID := FEngine.GetNextID;
   FDocumentInfo.Save(InfoID, FEngine);
@@ -852,6 +912,16 @@ begin
   FEngine.SaveXREFAndTrailer( CatalogID, InfoID, EncryptID, FEngine.FileID);
   if Assigned(FDigSignature) then
     FEngine.SaveAdditional(FDigSignature);
+
+{$IFDEF PDF_CANVAS_DEBUG}
+  Dbg:= TMemoryStream.Create();
+  try
+    Dbg.CopyFrom(FEngine.Stream,0);
+    Dbg.SaveToFile( debugLogsDirectory + IntToStr ( iii ) + '.doc.txt' );
+  finally
+    FreeAndNil(Dbg);
+  end;
+{$ENDIF}
 end;
 
 procedure TPDFDocument.SetCompression(const Value: TCompressionType);
@@ -916,35 +986,47 @@ end;
 function TPDFDocument.AppendOptionalContent(LayerName: AnsiString; StartVisible,
   CanExchange: Boolean): TOptionalContent;
 begin
-  Result := TOptionalContent.Create(FEngine,LayerName,StartVisible,CanExchange);
-  FOptionalContents.Add(Result);
+  Result := TOptionalContent(FOptionalContents.Item[LayerName]);
+
+  if not Assigned( Result ) then
+  begin
+    Result := TOptionalContent.Create(FEngine,LayerName,StartVisible,CanExchange);
+    {$ifndef UNICODE}
+    Result.Charset := FOptionalContents.Charset;
+    {$endif}
+    FOptionalContents.Add(Result);
+  end;
 end;
-
-
 
 { TPDFDocInfo }
 
 procedure TPDFDocInfo.Save(ID: Integer;PDFEngine: TPDFEngine);
+{$ifndef UNICODE}
+var
+  Charset: TFontCharset;
+{$endif}
 begin
   PDFEngine.StartObj( ID );
-{$ifdef UNICODE}
-  PDFEngine.SaveToStream ( '/Creator ' + CryptString( PDFEngine.SecurityInfo, UnicodeChar(FCreator), ID ) );
+{$ifndef UNICODE}
+  Charset := GetDefFontCharSet;
+
+  PDFEngine.SaveToStream ( '/Creator ' + CryptString( PDFEngine.SecurityInfo, UnicodeChar(FCreator,Charset), ID ) );
   PDFEngine.SaveToStream ( '/CreationDate ' + CryptString ( PDFEngine.SecurityInfo,'D:' + AnsiString(FormatDateTime ( 'yyyymmddhhnnss', FCreationDate ))+'Z' , ID) );
   PDFEngine.SaveToStream ( '/ModDate ' + CryptString ( PDFEngine.SecurityInfo,'D:' + AnsiString(FormatDateTime ( 'yyyymmddhhnnss', Now ))+'Z' , ID) );
+  PDFEngine.SaveToStream ( '/Producer ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FProducer,Charset) , ID) );
+  PDFEngine.SaveToStream ( '/Author ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar(FAuthor,Charset) , ID) );
+  PDFEngine.SaveToStream ( '/Title ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar(FTitle,Charset) , ID) );
+  PDFEngine.SaveToStream ( '/Subject ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FSubject,Charset) , ID) );
+  PDFEngine.SaveToStream ( '/Keywords ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FKeywords,Charset) , ID) );
+{$else}
+  PDFEngine.SaveToStream ( '/Creator ' + CryptString( PDFEngine.SecurityInfo, UnicodeChar(FCreator), ID ) );
+  PDFEngine.SaveToStream ( '/CreationDate ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar('D:' + FormatDateTime ( 'yyyymmddhhnnss', FCreationDate )+'Z') , ID) );
+  PDFEngine.SaveToStream ( '/ModDate ' + CryptString ( PDFEngine.SecurityInfo,'D:' + AnsiString(FormatDateTime ( 'yyyymmddhhnnss', Now ))+'Z' , ID) );
   PDFEngine.SaveToStream ( '/Producer ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FProducer) , ID) );
-  PDFEngine.SaveToStream ( '/Author ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar(FAuthor) , ID) );
+  PDFEngine.SaveToStream ( '/Author ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar(FAuthor), ID) );
   PDFEngine.SaveToStream ( '/Title ' + CryptString ( PDFEngine.SecurityInfo,UnicodeChar(FTitle) , ID) );
   PDFEngine.SaveToStream ( '/Subject ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FSubject) , ID) );
   PDFEngine.SaveToStream ( '/Keywords ' + CryptString (PDFEngine.SecurityInfo, UnicodeChar(FKeywords) , ID) );
-{$else}
-  PDFEngine.SaveToStream ( '/Creator ' + CryptString( PDFEngine.SecurityInfo, FCreator, ID ) );
-  PDFEngine.SaveToStream ( '/CreationDate ' + CryptString ( PDFEngine.SecurityInfo,'D:' + FormatDateTime ( 'yyyymmddhhnnss', FCreationDate )+'Z' , ID) );
-  PDFEngine.SaveToStream ( '/ModDate ' + CryptString ( PDFEngine.SecurityInfo,'D:' + AnsiString(FormatDateTime ( 'yyyymmddhhnnss', Now ))+'Z' , ID) );
-  PDFEngine.SaveToStream ( '/Producer ' + CryptString (PDFEngine.SecurityInfo, FProducer , ID) );
-  PDFEngine.SaveToStream ( '/Author ' + CryptString ( PDFEngine.SecurityInfo,FAuthor , ID) );
-  PDFEngine.SaveToStream ( '/Title ' + CryptString ( PDFEngine.SecurityInfo,FTitle , ID) );
-  PDFEngine.SaveToStream ( '/Subject ' + CryptString (PDFEngine.SecurityInfo, FSubject , ID) );
-  PDFEngine.SaveToStream ( '/Keywords ' + CryptString (PDFEngine.SecurityInfo, FKeywords , ID) );
 {$endif}
   PDFEngine.CloseObj;
 end;

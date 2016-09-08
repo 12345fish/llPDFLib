@@ -1,9 +1,9 @@
-program Layer;
+﻿program Layer;
 {$i demo.inc}
 
 var
   MyPDF: TPDFDocument;
-  Op1, Op2, Op3, Op4: TOptionalContent;
+  Gr1,Gr2, Op1, Op2, Op3, Op4: TOptionalContent;
   F1: TPDFForm;
   I: Integer;
   MF: TMetafile;
@@ -15,10 +15,22 @@ begin
     MyPDF.FileName := 'Data\PDFFiles\Layer.pdf';
     MyPDF.DocumentInfo.Title := 'llPDFLib 6.x Demo [Optional Content]';
     MyPDF.BeginDoc;
+
+    Gr1 := MyPDF.AppendOptionalContent(AnsiToUtf8('圖層組 1')+ ' (Layers group 1)', True);
+    Gr2 := MyPDF.AppendOptionalContent(AnsiToUtf8('Группа слоев 2')+' (Layers group 2)', True);
+
     Op1 := MyPDF.AppendOptionalContent('Layer 1 Visible rectangle and form with text', True);
     Op2 := MyPDF.AppendOptionalContent('Layer 2 Invisible round rectangle', False);
+
     Op3 := MyPDF.AppendOptionalContent('Layer 2 Visible image File', True, False );
     Op4 := MyPDF.AppendOptionalContent('Layer 4 Invisible ellipse', false );
+
+    Gr1.AppendNested(Op1);
+    Gr1.AppendNested(Op2);
+
+    Gr2.AppendNested(Op3);
+    Gr2.AppendNested(Op4);
+
     F1 :=MyPDF.AppendForm(Op1);
     with F1 do
     begin

@@ -24,6 +24,22 @@ uses
 {$endif}
 
 {#int}
+const
+  /// <summary>
+  ///   list of common fonts available by default since Windows 2000
+  ///   - to not embedd these fonts in the PDF document, and save some KB,
+  ///   just use the TPdfDocument.NonEmbeddedFonts property:
+  ///  PdfDocument.EmbeddedTTFIgnore.Text := WINDOWS_DEFAULT_FONTS;
+  /// </summary>
+  WINDOWS_DEFAULT_FONTS: string =
+    'Arial'#13#10'Courier New'#13#10'Georgia'#13#10+
+    'Impact'#13#10'Lucida Console'#13#10'Roman'#13#10'Symbol'#13#10+
+    'Tahoma'#13#10'Times New Roman'#13#10'Trebuchet'#13#10+
+    'Verdana'#13#10'WingDings';
+
+{#int}
+
+{#int}
 type
 
 {#int}

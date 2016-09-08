@@ -21,8 +21,7 @@ uses
  llPDFTypes;
 
 const
-  MLS = MaxInt div 16;
-
+  MLS = MaxInt div{$IFDEF WIN32}16{$ELSE}32{$ENDIF};
 type
   TTextCTM = record
     a, b, c, d, x, y: Extended;
@@ -76,7 +75,7 @@ type
   function LCase(const S: AnsiString): AnsiString;
 
 {$ifndef UNICODE}
-  function UnicodeChar ( Text: string; Charset: Integer ): string;
+  function UnicodeChar ( Text: string; Charset: TFontCharset ): string;overload;
 {$else}
   function UnicodeChar( Text:string):AnsiString;
 {$endif}
@@ -116,7 +115,9 @@ type
   PAnsiStringItem = ^TAnsiStringItem;
   TAnsiStringItem = record
     FString: AnsiString;
+    FObject: TObject;
   end;
+
   PAnsiStringItemList = ^TAnsiStringItemList;
   TAnsiStringItemList = array[0..MLS] of TAnsiStringItem;
 
@@ -126,6 +127,7 @@ type
     FCount: Integer;
     FCapacity: Integer;
     FLineBreak: AnsiString;
+    FAcceptDuplicates: Boolean;
     procedure Grow;
     procedure Error(const Msg: string; Data: Integer); overload;
     procedure Error(Msg: PResStringRec; Data: Integer); overload;
@@ -138,18 +140,27 @@ type
     function GetCount: Integer;
     procedure Put(Index: Integer; const S: AnsiString);
     procedure SetCapacity(NewCapacity: Integer);
+    function Find(const S: AnsiString; var Index: Integer): Boolean; virtual;
+    function GetObject(Index: Integer): TObject; virtual;
+    procedure PutObject(Index: Integer; AObject: TObject); virtual;
   public
     constructor Create;
     destructor Destroy; override;
     function Add(const S: AnsiString): Integer;
+    function AddObject(const S: AnsiString; AObject: TObject): Integer;
     procedure Clear;
+    procedure Delete(Index: Integer); virtual;
     procedure Insert(Index: Integer; const S: AnsiString);
+    function IndexOf(const S: AnsiString): Integer;
+    function IndexOfObject(AObject: TObject): Integer; virtual;
     procedure SaveToStream(Stream: TStream);
     procedure SaveToFile(const FileName: string);
     property Strings[Index: Integer]: AnsiString read Get write Put; default;
+    property Objects[Index: Integer]: TObject read GetObject write PutObject;
     property Count: Integer read GetCount;
     property Text: AnsiString read GetTextStr write SetTextStr;
     property LineBreak: AnsiString read FLineBreak write FLineBreak;
+    property AcceptDuplicates: Boolean read FAcceptDuplicates write FAcceptDuplicates;
    end;
 {$else}
   TAnsiStringList = TStringList;
@@ -497,7 +508,7 @@ end;
 
 
 {$ifndef UNICODE}
-function UnicodeChar ( Text: string; Charset: Integer ): string;
+function UnicodeChar ( Text: string; Charset: TFontCharset ): string;
 var
   A: array of Word;
   W: PWideChar;
@@ -538,7 +549,7 @@ end;
 {$endif}
 
 {$ifdef UNICODE}
-function UnicodeChar( Text:string):AnsiString;
+function UnicodeChar( Text:string ):AnsiString;
 var
   i, L: integer;
 begin
@@ -1251,6 +1262,12 @@ begin
   InsertItem(Result, S);
 end;
 
+function TAnsiStringList.AddObject(const S: AnsiString; AObject: TObject): Integer;
+begin
+  Result := Add(S);
+  PutObject(Result, AObject);
+end;
+
 procedure TAnsiStringList.Clear;
 begin
   if FCount <> 0 then
@@ -1267,6 +1284,18 @@ begin
   FCapacity := 0;
   FList := nil;
   FLineBreak := #13#10;
+end;
+
+procedure TAnsiStringList.Delete(Index: Integer);
+begin
+  if (Index < 0) or (Index >= FCount) then Error(@SListIndexError, Index);
+
+  Finalize(FList^[Index]);
+  Dec(FCount);
+
+  if Index < FCount then
+    System.Move(FList^[Index + 1], FList^[Index],
+      (FCount - Index) * SizeOf(TAnsiStringItem));
 end;
 
 destructor TAnsiStringList.Destroy;
@@ -1293,6 +1322,14 @@ begin
   Result := FCount;
 end;
 
+
+function TAnsiStringList.GetObject(Index: Integer): TObject;
+begin
+  if (Index < 0) or (Index >= FCount) then
+    Error(@SListIndexError, Index);
+
+    Result := FList^[Index].FObject;
+end;
 
 function TAnsiStringList.GetTextStr: AnsiString;
 var
@@ -1334,6 +1371,19 @@ begin
   SetCapacity(FCapacity + Delta);
 end;
 
+function TAnsiStringList.IndexOf(const S: AnsiString): Integer;
+begin
+  if not Find(S, Result) then
+    Result := -1;
+end;
+
+function TAnsiStringList.IndexOfObject(AObject: TObject): Integer;
+begin
+  for Result := 0 to GetCount - 1 do
+    if GetObject(Result) = AObject then Exit;
+  Result := -1;
+end;
+
 procedure TAnsiStringList.Insert(Index: Integer; const S: AnsiString);
 begin
   if (Index < 0) or (Index > FCount) then Error(@SListIndexError, Index);
@@ -1344,6 +1394,14 @@ procedure TAnsiStringList.Put(Index: Integer; const S: AnsiString);
 begin
   if (Index < 0) or (Index >= FCount) then Error(@SListIndexError, Index);
   FList^[Index].FString := S;
+end;
+
+procedure TAnsiStringList.PutObject(Index: Integer; AObject: TObject);
+begin
+  if (Index < 0) or (Index >= FCount) then
+    Error(@SListIndexError, Index);
+
+  FList^[Index].FObject := AObject;
 end;
 
 procedure TAnsiStringList.SaveToStream(Stream: TStream);
@@ -1398,6 +1456,30 @@ end;
 procedure TAnsiStringList.Error(Msg: PResStringRec; Data: Integer);
 begin
   Error(LoadResString(Msg), Data);
+end;
+
+function TAnsiStringList.Find(const S: AnsiString; var Index: Integer): Boolean;
+var
+  L, H, I, C: Integer;
+begin
+  Result := False;
+  L := 0;
+  H := FCount - 1;
+  while L <= H do
+  begin
+    I := (L + H) shr 1;
+    C := AnsiCompareText(String(FList^[I].FString),String(S));
+    if C < 0 then L := I + 1 else
+    begin
+      H := I - 1;
+      if C = 0 then
+      begin
+        Result := True;
+        if not FAcceptDuplicates then L := I;
+      end;
+    end;
+  end;
+  Index := L;
 end;
 
 procedure TAnsiStringList.InsertItem(Index: Integer; const S: AnsiString);

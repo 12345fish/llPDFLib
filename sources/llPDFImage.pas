@@ -268,7 +268,7 @@ type
 implementation
 
 uses
-{$ifdef WIN64}
+{$ifdef W3264}
   System.ZLib, System.ZLibConst,
 {$else}
   llPDFFlate,

@@ -158,10 +158,10 @@ type
     FEMFOptions: TPDFEMFParseOptions;
     FImages:TPDFImages;
     ROP2:Integer;
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
     LastRecordInContents: Integer;
     TXTStr: AnsiString;
-    Debug: TAnsiStringList;
+    DebugLog: TAnsiStringList;
     procedure SaveToLog ( Data: PEnhMetaRecord );
 {$ENDIF}
     function AddBitmap(BM:TBitmap):Integer ;
@@ -296,6 +296,12 @@ type
     destructor Destroy; override;
   end;
 
+{$IFDEF CANVASDBG}
+var
+  iii: Integer = 0;
+  debugLogsDirectory: string = '';
+{$ENDIF}
+
 {$endif}
 implementation
 {$ifndef BASE}
@@ -304,9 +310,6 @@ type
   PSmallPointArray = ^TSmallPointArray;
   TPointArray = array [ 0..MaxInt div SizeOf ( TPoint ) - 1 ] of TPoint;
   PPointArray = ^TPointArray;
-
-
-
 
 { TEMWParser }
 
@@ -319,13 +322,6 @@ begin
   Result := Pointer ( v );
 end;
 
-
-{$IFDEF CANVASDBG}
-var
-  iii: Integer = 0;
-{$ENDIF}
-
-
 constructor TEMWParser.Create ( Engine:TPDFEngine; FontManager:TPDFFonts;ACanvas: TPDFCanvas; EMFOptions: TPDFEMFParseOptions;
   Images:TPDFImages; Patterns: TPDFListManager; Resolution: Integer; Content: TAnsiStringList );
 begin
@@ -336,8 +332,8 @@ begin
   FEMFOptions:= EMFOptions;
   FImages := Images;
   FPatterns:= Patterns;
-{$IFDEF CANVASDBG}
-  Debug := TAnsiStringList.Create;
+{$IFDEF DEBUG_EMF_COMMANDS}
+  DebugLog := TAnsiStringList.Create;
 {$ENDIF}
   Meta := TMetafile.Create;
   MetaCanvas := TMetafileCanvas.Create ( Meta, FEMFOptions.UsedDC );
@@ -351,8 +347,8 @@ destructor TEMWParser.Destroy;
 begin
   MetaCanvas.Free;
   Meta.Free;
-{$IFDEF CANVASDBG}
-  Debug.Free;
+{$IFDEF DEBUG_EMF_COMMANDS}
+  DebugLog.Free;
 {$ENDIF}
   inherited;
 end;
@@ -371,7 +367,7 @@ end;
 
 procedure TEMWParser.CheckBrushToHatched;
 var
-  I, Len: Integer;
+  I, Len, PatSize,PatHalfSize: Integer;
   Pattern: TPDFPattern;
 begin
   if CBrush.lbStyle <> BS_HATCHED then
@@ -397,55 +393,62 @@ begin
     FHatchedPatterns[Len].Color := CBrush.lbColor;
     Pattern := FHatchedPatterns[Len].idx;
     FPatterns.Add(Pattern);
-    Pattern.Width := 4;
-    Pattern.Height := 4;
-    Pattern.XStep := 4;
-    Pattern.YStep := 4;
+
+    PatSize := 4;
+    PatHalfSize := 2;
+
+    Pattern.Width := PatSize;
+    Pattern.Height := PatSize;
+    Pattern.XStep := PatSize;
+    Pattern.YStep := PatSize;
+
     with Pattern do
     begin
       NewPath;
-      Rectangle(0,0,4,4);
+      Rectangle(0,0,PatSize,PatSize);
       SetColorFill(ColorToPDFColor(BGColor));
       Fill;
       NewPath;
       SetColorStroke(ColorToPDFColor(CBrush.lbColor));
       SetLineWidth(0.3);
+
       case CBrush.lbHatch of
         HS_VERTICAL:
           begin
-            MoveTo(2,0);
-            LineTo(2,4);
+            MoveTo(PatHalfSize,0);
+            LineTo(PatHalfSize,PatSize);
           end;
         HS_HORIZONTAL:
           begin
-            MoveTo(0,2);
-            LineTo(4,2);
+            MoveTo(0,PatHalfSize);
+            LineTo(PatSize,PatHalfSize);
           end;
         HS_FDIAGONAL:
           begin
             MoveTo(0,0);
-            LineTo(4,4);
+            LineTo(PatSize,PatSize);
           end;
         HS_BDIAGONAL:
           begin
-            MoveTo(4,0);
-            LineTo(0,4);
+            MoveTo(PatSize,0);
+            LineTo(0,PatSize);
           end;
         HS_CROSS:
           begin
-            MoveTo(2,0);
-            LineTo(2,4);
-            MoveTo(0,2);
-            LineTo(4,2);
+            MoveTo(PatHalfSize,0);
+            LineTo(PatHalfSize,PatSize);
+            MoveTo(0,PatHalfSize);
+            LineTo(PatSize,PatHalfSize);
           end;
-        else
+        HS_DIAGCROSS:
           begin
             MoveTo(0,0);
-            LineTo(4,4);
-            MoveTo(4,0);
-            LineTo(0,4);
+            LineTo(PatSize,PatSize);
+            MoveTo(PatSize,0);
+            LineTo(0,PatSize);
           end;
       end;
+
       Stroke;
     end;
   end;
@@ -742,8 +745,8 @@ begin
         F.lfFaceName, LF_FACESIZE, nil, nil );
       HandleTable [ Data^.ihFont ] := CreateFontIndirectA ( F );
     end;
-  {$IFDEF CANVASDBG}
-      Debug.Add ( 'Font: ' + AnsiString(Data^.elfw.elfLogFont.lfFaceName ));
+  {$IFDEF DEBUG_EMF_COMMANDS}
+      DebugLog.Add ( 'Font: ' + AnsiString(Data^.elfw.elfLogFont.lfFaceName ));
   {$ENDIF}
 end;
 
@@ -874,7 +877,7 @@ var
   CodePage: Integer;
   CHS: TFontCharset;
   YRotate:Integer;
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
   sd: PByteArray;
   UNIs: PWordArray;
 {$ENDIF}
@@ -1067,7 +1070,7 @@ procedure CalcPosition;
     X := GX ( X, true );
   end;
 
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
 
   procedure DoReadableText;
   var
@@ -1211,7 +1214,7 @@ begin
   Chkbg := False;
   FCanvas.TextFromBaseLine ( False );
   IsGlyphs := ( Data^.emrtext.fOptions and ETO_GLYPH_INDEX  )<> 0;
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
   TXTStr := #13#10 + AnsiString(Format ( 'Angle = %d Bounds = (%d %d %d %d) Opaque = %d Clipped= %d',
     [ CFont.lfEscapement div 10, Data^.rclBounds.Left, Data^.rclBounds.Top, Data^.rclBounds.Right, Data^.rclBounds.Bottom, Data^.emrtext.fOptions and ETO_CLIPPED, Data^.emrtext.fOptions and ETO_OPAQUE ] ));
   TXTStr := TXTStr + #13#10 + AnsiString(Format ( 'XScale = %f YScale = %f Reference = (%d %d)', [ Data^.exScale, Data^.eyScale, Data^.emrText.ptlReference.x, Data^.emrText.ptlReference.y ] ));
@@ -1268,14 +1271,14 @@ begin
       SetFontColor;
       SetCurFont;
     end;
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
     TXTStr := TXTStr + #13#10 + AnsiString(Format ( 'X = %f Y = %f ', [ X, Y ] ));
 {$ENDIF}
 
     if Data^.emr.iType = EMR_EXTTEXTOUTW then
     begin
 
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
       DoReadableText;
 {$ENDIF}
       if not IsGlyphs then
@@ -1300,7 +1303,7 @@ begin
       end;
     end else
     begin
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
       TXTStr := TXTStr + #13#10 + 'Text: ' + s;
 {$ENDIF}
       if PIN <> nil then
@@ -2534,7 +2537,7 @@ begin
   end;
 end;
 
-{$ifdef CANVASDBG}
+{$ifdef DEBUG_EMF_COMMANDS}
 const
   ADAR:Integer = 0;
 {$endif}
@@ -2606,7 +2609,7 @@ begin
   Inc ( Parser.CurRec );
   try
     Parser.ExecuteRecord ( EMFRecord );
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
     Parser.SaveToLog ( EMFRecord );
 {$ENDIF}
   except
@@ -2677,9 +2680,11 @@ begin
   InitExecute;
   R := Rect ( 0, 0, 0, 0 );
   EnumEnhMetafile ( 0,mfh, @EnumEMFRecordsProc, self, R );
-{$IFDEF CANVASDBG}
-  DeleteEnhMetaFile ( CopyEnhMetaFile ( MFH, PChar ( 'HDCDebug\' + IntToStr ( iii ) + '.emf' ) ) );
-  Debug.SaveToFile ( 'HDCDebug\' + IntToStr ( iii ) + '.txt' );
+
+{$IFDEF DEBUG_EMF_COMMANDS}
+  DeleteEnhMetaFile ( CopyEnhMetaFile ( MFH, PChar ( debugLogsDirectory + IntToStr ( iii ) + '.emf' ) ) );
+
+  DebugLog.SaveToFile ( debugLogsDirectory + IntToStr ( iii ) + '.txt' );
   Inc ( iii );
 {$ENDIF}
 
@@ -3016,7 +3021,7 @@ begin
   FCha := True;
 end;
 
-{$IFDEF CANVASDBG}
+{$IFDEF DEBUG_EMF_COMMANDS}
 
 procedure TEMWParser.SaveToLog ( Data: PEnhMetaRecord );
 var
@@ -3161,15 +3166,15 @@ begin
   end;
   if Data^.iType = EMR_EXTTEXTOUTW then
     S := S + TXTStr;
-  Debug.Add ( IStr ( CurRec ) + '   ' + S );
+  DebugLog.Add ( IStr ( CurRec ) + '   ' + S );
   if LastRecordInContents <> FContent.Count then
   begin
-    Debug.Add ( '' );
-    Debug.Add ( '-----------------------------------' );
+    DebugLog.Add ( '' );
+    DebugLog.Add ( '-----------------------------------' );
     for i := LastRecordInContents to FContent.Count - 1 do
-      Debug.Add ( '     ' + FContent [ i ] );
-    Debug.Add ( '-----------------------------------' );
-    Debug.Add ( '' );
+      DebugLog.Add ( '     ' + FContent [ i ] );
+    DebugLog.Add ( '-----------------------------------' );
+    DebugLog.Add ( '' );
     LastRecordInContents := FContent.Count;
   end;
 end;
@@ -3315,9 +3320,12 @@ begin
   DC := GetDC ( 0 );
   BGColor := GetBkColor ( DC );
   ReleaseDC ( 0, DC );
-{$IFDEF CANVASDBG}
+
+{$IFDEF DEBUG_EMF_COMMANDS}
   LastRecordInContents := FContent.Count;
-  CreateDir ( 'HDCDebug' );
+  if not DirectoryExists( debugLogsDirectory ) then
+    CreateDir ( debugLogsDirectory );
+    
 //  MS.SaveToFile('HDCDebug\' + IntToStr(iii) + '.emf');
 {$ENDIF}
   FEX := False;
@@ -3784,5 +3792,11 @@ begin
     Result := FImages.AddImage ( BM, itcJpeg );
 end;
 {$endif}
+
+initialization
+{$IFDEF CANVASDBG}
+  debugLogsDirectory := ExtractFilePath(ParamStr(0)) + 'HDCDebug' + PathDelim;
+{$ENDIF}
+
 end.
 

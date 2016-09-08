@@ -15,7 +15,7 @@ unit llPDFFlate;
 
 interface
 
-{$IFDEF win32}
+{$IFNDEF W3264}
 
 uses
 {$ifndef USENAMESPACE}
@@ -82,7 +82,8 @@ type
 {$ENDIF}
 
 implementation
-{$IFDEF win32}
+
+{$IFNDEF W3264}
 uses llPDFResources;
 
 
@@ -121,6 +122,19 @@ const
 
   Z_DEFLATED = 8;
 
+  _z_errmsg: array[0..9] of PChar = (
+    'need dictionary',      // Z_NEED_DICT      (2)
+    'stream end',           // Z_STREAM_END     (1)
+    '',                     // Z_OK             (0)
+    'file error',           // Z_ERRNO          (-1)
+    'stream error',         // Z_STREAM_ERROR   (-2)
+    'data error',           // Z_DATA_ERROR     (-3)
+    'insufficient memory',  // Z_MEM_ERROR      (-4)
+    'buffer error',         // Z_BUF_ERROR      (-5)
+    'incompatible version', // Z_VERSION_ERROR  (-6)
+    ''
+  );
+
 {$L obj\deflate.obj}
 {$L obj\inflate.obj}
 {$L obj\inftrees.obj}
@@ -145,7 +159,6 @@ procedure inflate_set_dictionary; external;
 procedure inflate_trees_bits; external;
 procedure inflate_trees_dynamic; external;
 procedure inflate_trees_fixed; external;
-procedure inflate_trees_free; external;
 procedure inflate_codes_new; external;
 procedure inflate_codes; external;
 procedure inflate_codes_free; external;
@@ -163,12 +176,23 @@ begin
   Move ( source^, dest^, count );
 end;
 
+function zcalloc(AppData: Pointer; Items, Size: Integer): Pointer;
+begin
+  GetMem(Result, Items*Size);
+end;
+
+procedure zcfree(AppData, Block: Pointer);
+begin
+  FreeMem(Block);
+end;
+
 const
-  zlib_Version = '1.0.4';
+  zlib_Version = '1.1.4';
 
 // deflate compresses data
 function deflateInit_ ( var strm: TZStreamRec; level: Integer; version: PANSIChar;
   recsize: Integer ): Integer; external;
+
 function deflate ( var strm: TZStreamRec; flush: Integer ): Integer; external;
 function deflateEnd ( var strm: TZStreamRec ): Integer; external;
 
@@ -328,7 +352,6 @@ begin
   else
     Result := ( 1.0 - ( FZRec.total_out / FZRec.total_in ) ) * 100.0;
 end;
-
 {$ENDIF}
 
 end.

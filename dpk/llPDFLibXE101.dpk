@@ -1,0 +1,62 @@
+package llPDFLibXE101;
+
+{$R *.res}
+{$R 'llPDFReg.dcr'}
+{$IFDEF IMPLICITBUILDING This IFDEF should not be used by users}
+{$ALIGN 8}
+{$ASSERTIONS ON}
+{$BOOLEVAL OFF}
+{$DEBUGINFO OFF}
+{$EXTENDEDSYNTAX ON}
+{$IMPORTEDDATA ON}
+{$IOCHECKS ON}
+{$LOCALSYMBOLS OFF}
+{$LONGSTRINGS ON}
+{$OPENSTRINGS ON}
+{$OPTIMIZATION ON}
+{$OVERFLOWCHECKS OFF}
+{$RANGECHECKS OFF}
+{$REFERENCEINFO OFF}
+{$SAFEDIVIDE OFF}
+{$STACKFRAMES OFF}
+{$TYPEDADDRESS OFF}
+{$VARSTRINGCHECKS ON}
+{$WRITEABLECONST ON}
+{$MINENUMSIZE 1}
+{$IMAGEBASE $400000}
+{$DEFINE RELEASE}
+{$ENDIF IMPLICITBUILDING}
+{$DESCRIPTION 'llPDFLib - Library for create PDF Documents'}
+{$IMPLICITBUILD OFF}
+
+requires
+  rtl,
+  vcl,
+  vclimg;
+
+contains
+  llPDFReg,
+  llPDFRSA,
+  llPDFResources,
+  llPDFOutline,
+  llPDFEMF,
+  llPDFAction,
+  llPDFAnnotation,
+  llPDFTrueType,
+  llPDFNames,
+  llPDFCertKey,
+  llPDFPFX,
+  llPDFEngine,
+  llPDFSecurity,
+  llPDFImage,
+  llPDFCCITT,
+  llPDFJBIG2,
+  llPDFMisc,
+  llPDFCrypt,
+  llPDFDocument,
+  llPDFTypes,
+  llPDFCanvas,
+  llPDFFont,
+  llPDFASN1;
+
+end.
