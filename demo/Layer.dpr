@@ -1,5 +1,6 @@
 ﻿program Layer;
 {$i demo.inc}
+{$i ..\sources\pdf.inc}
 
 var
   MyPDF: TPDFDocument;
@@ -16,8 +17,8 @@ begin
     MyPDF.DocumentInfo.Title := 'llPDFLib 6.x Demo [Optional Content]';
     MyPDF.BeginDoc;
 
-    Gr1 := MyPDF.AppendOptionalContent(AnsiToUtf8('圖層組 1')+ ' (Layers group 1)', True);
-    Gr2 := MyPDF.AppendOptionalContent(AnsiToUtf8('Группа слоев 2')+' (Layers group 2)', True);
+    Gr1 := MyPDF.AppendOptionalContent({$ifdef UNI}AnsiToUtf8('圖層組 1')+ {$endif}' (Layers group 1)', True);
+    Gr2 := MyPDF.AppendOptionalContent({$ifdef UNI}AnsiToUtf8('Группа слоев 2')+ {$endif}' (Layers group 2)', True);
 
     Op1 := MyPDF.AppendOptionalContent('Layer 1 Visible rectangle and form with text', True);
     Op2 := MyPDF.AppendOptionalContent('Layer 2 Invisible round rectangle', False);
